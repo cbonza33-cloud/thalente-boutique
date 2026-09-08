@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Order confirmed · Thalente Boutique</title>
+  <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/icons/favicon-16.png">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <style>
+    :root{font-family:Inter,system-ui,-apple-system,sans-serif;color:#241f1e;background:#fbfaf6;--gold:#b8a44f;--muted:#706a61;--line:#e7e1d7}
+    *{box-sizing:border-box}body{margin:0;min-height:100vh}.wrap{max-width:720px;margin:0 auto;padding:28px 18px 56px}
+    header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;font-family:Georgia,serif;font-weight:700;font-size:1.2rem}header span{color:var(--gold)}header a{font:600 .85rem Inter,system-ui;color:#5e584f}
+    .card{background:#fff;border:1px solid var(--line);border-radius:20px;padding:30px;box-shadow:0 10px 35px #241f1e0d}.hero{text-align:center;border-bottom:1px solid var(--line);padding-bottom:24px;margin-bottom:22px}.check{width:64px;height:64px;border-radius:50%;background:#e7f4e8;color:#2d7d46;display:grid;place-items:center;font-size:2rem;margin:0 auto 12px}.hero h1{font:700 2rem Georgia,serif;margin:0 0 8px}.hero p{color:var(--muted);margin:0}.meta{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:22px}.meta div{background:#fbfaf6;border-radius:10px;padding:12px}.label{display:block;color:var(--muted);font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}.items{border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:8px 0}.item{display:flex;justify-content:space-between;gap:16px;padding:12px 0}.item small{color:var(--muted);display:block;margin-top:3px}.total{display:flex;justify-content:space-between;font-size:1.15rem;font-weight:700;padding:18px 0 4px}.actions{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:24px}.btn{border:0;border-radius:10px;padding:12px 17px;font:600 .9rem Inter,system-ui;cursor:pointer;text-decoration:none}.primary{background:var(--gold);color:#fff}.outline{background:#fff;border:1px solid var(--line);color:#3f3933}@media(max-width:520px){.card{padding:22px 17px}.meta{grid-template-columns:1fr}.hero h1{font-size:1.65rem}}
+    @media print{body{background:#fff}.wrap{max-width:none;padding:0}.card{box-shadow:none;border:0;padding:0}header,.actions{display:none}.hero{padding-top:0}}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header><div>Thalente <span>Boutique</span></div><a href="/">Continue shopping</a></header>
+    <main class="card" id="content"><div class="hero"><div class="check">✓</div><h1>Order confirmed</h1><p>Loading your digital receipt…</p></div></main>
+  </div>
+  <script>
+    const content=document.getElementById("content"), id=new URLSearchParams(location.search).get("orderId");
+    const money=n=>`R${Number(n).toFixed(2)}`;
+    function printable(){window.print();}
+    async function load(){if(!id){content.innerHTML='<div class="hero"><div class="check">!</div><h1>Receipt unavailable</h1><p>No order number was supplied.</p></div>';return}
+      try{const r=await fetch(`/api/orders/${encodeURIComponent(id)}`);const o=await r.json();if(!r.ok)throw new Error(o.error||"Order not found");
+        const isDemo=o.payment_method==="demo";
+        content.innerHTML=`<div class="hero"><div class="check">✓</div><h1>Thank you, ${o.customer_name.split(" ")[0]}!</h1><p>Your order has been received${isDemo?" and paid in Demo Mode":" and payment is confirmed"}.</p></div>
+          <div class="meta"><div><span class="label">Order number</span>#${o.id}</div><div><span class="label">Status</span>${o.display_status}</div><div><span class="label">Customer email</span>${o.customer_email}</div><div><span class="label">Placed</span>${new Date(o.created_at).toLocaleString("en-ZA")}</div></div>
+          <h2 style="font:700 1.1rem Georgia,serif">Order summary</h2><div class="items">${o.items.map(i=>`<div class="item"><div><strong>${i.name}</strong><small>Size: ${i.size||"One Size"} · Quantity: ${i.quantity}</small></div><strong>${money(i.price*i.quantity)}</strong></div>`).join("")}</div>
+          <div class="total"><span>Total paid</span><span>${money(o.total_amount)}</span></div>
+          <div class="actions"><button class="btn primary" onclick="printable()">Download / Print Digital Receipt</button><a class="btn outline" href="/">Continue shopping</a></div>`;
+      }catch(e){content.innerHTML=`<div class="hero"><div class="check">!</div><h1>Receipt unavailable</h1><p>${e.message}</p></div>`}}
+    load();
+  </script>
+</body>
+</html>

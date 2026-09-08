@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: thalente-boutique-electronics
+    runtime: node
+    plan: starter
+    region: oregon
+    branch: main
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Set a real secret PIN in the Render dashboard — do not commit one.
+      - key: ADMIN_PIN
+        sync: false
+      # Get this from your Yoco merchant dashboard. Leave unset to run in
+      # safe "demo mode" (orders auto-complete locally, no real charge).
+      - key: YOCO_SECRET_KEY
+        sync: false
+      # Your live Render URL, e.g. https://thalente-boutique-electronics.onrender.com
+      - key: ALLOWED_ORIGIN
+        sync: false
+    # Persists the SQLite database (products, orders, receipts, notifications)
+    # across deploys and restarts. Note: Render only allows one disk per
+    # service, so files uploaded through the admin panel to public/uploads
+    # (custom product photos, quote portfolios) are NOT covered by this disk
+    # and will be lost on redeploy — use image URLs for anything that must
+    # survive a redeploy, or move uploads to S3/Cloudinary later.
+    disk:
+      name: thalente-data
+      mountPath: /opt/render/project/src/data
+      sizeGB: 1

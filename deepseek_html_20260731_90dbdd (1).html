@@ -1,0 +1,338 @@
+display: flex;
+            gap: 6px;
+        }
+        .modal-content .modal-product-image .image-thumbs .thumb-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: var(--radius-full);
+            background: rgba(255, 255, 255, 0.5);
+            cursor: pointer;
+            transition: var(--transition);
+        }
+        .modal-content .modal-product-image .image-thumbs .thumb-dot.active {
+            background: var(--color-white);
+            width: 24px;
+        }
+        .modal-content h3 {
+            font-size: 1.4rem;
+            font-weight: var(--font-weight-bold);
+            margin-bottom: 4px;
+        }
+        .modal-content .modal-price {
+            font-size: 1.2rem;
+            font-weight: var(--font-weight-bold);
+            color: var(--color-primary);
+            margin-bottom: 16px;
+        }
+        .modal-content .modal-desc {
+            font-size: 0.9rem;
+            color: var(--color-text-secondary);
+            margin-bottom: 24px;
+            line-height: 1.5;
+        }
+        .modal-content .modal-size-selector {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 24px;
+        }
+        .modal-content .modal-size-selector .size-btn {
+            flex: 1;
+            padding: 12px;
+            border: 1.5px solid var(--color-border);
+            background: transparent;
+            border-radius: var(--radius-sm);
+            font-weight: var(--font-weight-semibold);
+            cursor: pointer;
+            color: var(--color-text);
+            transition: var(--transition);
+        }
+        .modal-content .modal-size-selector .size-btn.active {
+            border-color: var(--color-primary);
+            background: var(--color-primary);
+            color: var(--color-white);
+        }
+
+        /* Bottom Navigation */
+        .bottom-nav {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: var(--bottom-nav-height);
+            background: rgba(255, 254, 248, 0.92);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-top: 1px solid var(--color-border);
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+            z-index: 100;
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+        .bottom-nav .nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            color: var(--color-text-muted);
+            text-decoration: none;
+            font-size: 0.65rem;
+            font-weight: var(--font-weight-medium);
+            transition: var(--transition);
+            width: 60px;
+        }
+        .bottom-nav .nav-item.active {
+            color: var(--color-primary);
+        }
+
+        /* Notifications */
+        .notification-container {
+            position: fixed;
+            bottom: calc(var(--bottom-nav-height) + 20px);
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 300;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            width: max-content;
+        }
+        .notification-container .notification {
+            background: var(--color-text);
+            color: var(--color-bg);
+            padding: 12px 24px;
+            border-radius: var(--radius-full);
+            font-size: 0.85rem;
+            font-weight: var(--font-weight-medium);
+            box-shadow: var(--shadow-md);
+            animation: slideUp 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+        }
+        @keyframes slideUp {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Header -->
+    <header class="app-header">
+        <a href="#" class="logo">
+            <span class="logo-text">Thalente<span class="accent">.</span></span>
+        </a>
+        <div class="header-actions">
+            <button class="btn-icon" id="theme-toggle" aria-label="Toggle Dark Mode">
+                🌙
+            </button>
+            <button class="btn-icon" aria-label="Cart">
+                🛍️
+                <span class="badge show" id="cart-badge">2</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="app-main">
+        <!-- Search -->
+        <div class="search-bar" style="margin: 0 0 20px 0; max-width: 100%;">
+            <span class="search-icon">🔍</span>
+            <input type="text" placeholder="Search designer collections..." />
+        </div>
+
+        <!-- Hero Banner -->
+        <div class="hero-banner">
+            <span class="hero-label">Summer Collection 2026</span>
+            <h1>The <span class="highlight">Oasis</span> Edit</h1>
+            <p>Discover flowing silhouettes and earth tones inspired by the African landscape.</p>
+            <button class="btn btn-primary btn-sm">Shop Now</button>
+        </div>
+
+        <!-- Categories -->
+        <section class="section">
+            <div class="categories-grid">
+                <a href="#" class="category-card">
+                    <div class="cat-icon">👗</div>
+                    <span class="cat-name">Dresses</span>
+                </a>
+                <a href="#" class="category-card">
+                    <div class="cat-icon">👜</div>
+                    <span class="cat-name">Bags</span>
+                </a>
+                <a href="#" class="category-card">
+                    <div class="cat-icon">👠</div>
+                    <span class="cat-name">Shoes</span>
+                </a>
+                <a href="#" class="category-card">
+                    <div class="cat-icon">✨</div>
+                    <span class="cat-name">Jewelry</span>
+                </a>
+            </div>
+        </section>
+
+        <!-- Product Feed -->
+        <section class="section">
+            <div class="section-header">
+                <h2>New Arrivals</h2>
+                <a href="#" class="see-all">View All</a>
+            </div>
+            
+            <div class="filter-sort-bar">
+                <div class="filter-pills">
+                    <button class="pill active">All</button>
+                    <button class="pill">Evening</button>
+                    <button class="pill">Casual</button>
+                    <button class="pill">Outerwear</button>
+                </div>
+            </div>
+
+            <div class="product-grid">
+                <!-- Product 1 -->
+                <div class="product-card" onclick="openProductModal('👗', 'Emerald Silk Gown', 'R 4,500', 'Elegant pure silk gown featuring a sweeping train and intricate bodice detailing. Perfect for evening galas.')">
+                    <div class="product-image">
+                        <div class="product-emoji">👗</div>
+                        <button class="wishlist-btn" onclick="toggleWishlist(event, this)">♡</button>
+                        <span class="badge-new">New</span>
+                    </div>
+                    <div class="product-info">
+                        <div class="product-brand">Thalente Edit</div>
+                        <div class="product-name">Emerald Silk Gown</div>
+                        <div class="product-price">R 4,500</div>
+                    </div>
+                </div>
+
+                <!-- Product 2 -->
+                <div class="product-card" onclick="openProductModal('👜', 'Savannah Leather Tote', 'R 2,800', 'Handcrafted genuine leather tote bag with brass hardware and a spacious interior compartment.')">
+                    <div class="product-image">
+                        <div class="product-emoji">👜</div>
+                        <button class="wishlist-btn" onclick="toggleWishlist(event, this)">♡</button>
+                    </div>
+                    <div class="product-info">
+                        <div class="product-brand">Artisan Collection</div>
+                        <div class="product-name">Savannah Leather Tote</div>
+                        <div class="product-price">R 2,800</div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Product Modal -->
+    <div class="modal-overlay" id="product-modal" onclick="closeModal(event)">
+        <div class="modal-content" onclick="event.stopPropagation()">
+            <div class="modal-handle"></div>
+            <button class="modal-close" onclick="closeModal(event)">✕</button>
+            
+            <div class="modal-product-image">
+                <span id="modal-emoji">👗</span>
+                <div class="image-thumbs">
+                    <div class="thumb-dot active"></div>
+                    <div class="thumb-dot"></div>
+                    <div class="thumb-dot"></div>
+                </div>
+            </div>
+            
+            <h3 id="modal-title">Product Name</h3>
+            <div class="modal-price" id="modal-price">R 0,000</div>
+            <p class="modal-desc" id="modal-desc">Product description goes here.</p>
+            
+            <div class="modal-size-selector">
+                <button class="size-btn active" onclick="selectSize(this)">S</button>
+                <button class="size-btn" onclick="selectSize(this)">M</button>
+                <button class="size-btn" onclick="selectSize(this)">L</button>
+            </div>
+            
+            <button class="btn btn-primary btn-block btn-lg" onclick="addToCart()">Add to Cart</button>
+        </div>
+    </div>
+
+    <!-- Notification Container -->
+    <div class="notification-container" id="notification-area"></div>
+
+    <!-- Bottom Navigation -->
+    <nav class="bottom-nav">
+        <a href="#" class="nav-item active">
+            <span style="font-size: 1.2rem;">🏠</span>
+            Home
+        </a>
+        <a href="#" class="nav-item">
+            <span style="font-size: 1.2rem;">🔍</span>
+            Search
+        </a>
+        <a href="#" class="nav-item">
+            <span style="font-size: 1.2rem;">♡</span>
+            Wishlist
+        </a>
+        <a href="#" class="nav-item">
+            <span style="font-size: 1.2rem;">👤</span>
+            Profile
+        </a>
+    </nav>
+
+    <script>
+        // Dark Mode Toggle
+        const themeBtn = document.getElementById('theme-toggle');
+        themeBtn.addEventListener('click', () => {
+            const isDark = document.body.getAttribute('data-theme') === 'dark';
+            document.body.setAttribute('data-theme', isDark ? 'light' : 'dark');
+            themeBtn.textContent = isDark ? '🌙' : '☀️';
+        });
+
+        // Modal Logic
+        const modal = document.getElementById('product-modal');
+        
+        function openProductModal(emoji, title, price, desc) {
+            document.getElementById('modal-emoji').textContent = emoji;
+            document.getElementById('modal-title').textContent = title;
+            document.getElementById('modal-price').textContent = price;
+            document.getElementById('modal-desc').textContent = desc;
+            modal.classList.add('open');
+            document.body.style.overflow = 'hidden'; // Prevent background scrolling
+        }
+
+        function closeModal(e) {
+            if (e) e.preventDefault();
+            modal.classList.remove('open');
+            document.body.style.overflow = '';
+        }
+
+        function selectSize(btn) {
+            document.querySelectorAll('.size-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+        }
+
+        function toggleWishlist(e, btn) {
+            e.stopPropagation();
+            btn.classList.toggle('active');
+            if (btn.classList.contains('active')) {
+                btn.textContent = '♥';
+                showNotification('Added to wishlist');
+            } else {
+                btn.textContent = '♡';
+            }
+        }
+
+        function addToCart() {
+            const badge = document.getElementById('cart-badge');
+            let count = parseInt(badge.textContent) || 0;
+            badge.textContent = count + 1;
+            closeModal();
+            showNotification('Added to cart');
+        }
+
+        function showNotification(message) {
+            const container = document.getElementById('notification-area');
+            const notif = document.createElement('div');
+            notif.className = 'notification';
+            notif.textContent = message;
+            container.appendChild(notif);
+            
+            setTimeout(() => {
+                notif.style.opacity = '0';
+                notif.style.transform = 'translateY(20px)';
+                notif.style.transition = 'all 0.3s ease';
+                setTimeout(() => notif.remove(), 300);
+            }, 2500);
+        }
+    </script>
+</body>
+</html>
