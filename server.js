@@ -52,7 +52,10 @@ app.use(helmet({
       scriptSrc: ["'self'", "'unsafe-inline'"],
       scriptSrcAttr: ["'unsafe-inline'"],
       styleSrc: ["'self'", "'unsafe-inline'", "https:"],
-      imgSrc: ["'self'", "data:", "https://images.unsplash.com"],
+      // 'self' covers admin-uploaded product photos (served from /uploads); https:
+      // covers the admin's "paste an image URL" field for any external host they
+      // choose — no specific demo/placeholder host is special-cased here.
+      imgSrc: ["'self'", "data:", "https:"],
       fontSrc: ["'self'", "https:", "data:"],
       connectSrc: ["'self'"],
       objectSrc: ["'none'"],
@@ -299,32 +302,6 @@ db.exec(`
   );
 `);
 
-const seedProducts = [
-  ["Women's Jacket", 159, "Women", 15, "Stylish double-breasted jacket in olive green. A versatile wardrobe staple.", "attached_assets/womens_s_jacket_s-m-l.png", 220, ["S", "M", "L"], 4.8, 112, 1, 1],
-  ["Women's Pocket Dotted Dress (White)", 50, "Women", 20, "Elegant polka-dot midi dress with a flattering A-line silhouette.", "attached_assets/womens_s_pocket_dotted_white_s-m-l-xl.png", 90, ["S", "M", "L", "XL"], 4.7, 203, 1, 1],
-  ["Women's Pocket Dotted Dress (Red)", 50, "Women", 18, "Bold red polka-dot midi dress with side pockets and button front.", "attached_assets/womens_s_dress_pocket_doted_red_s-m-l-xl.png", null, ["S", "M", "L", "XL"], 4.6, 88, 1, 1],
-  ["Women's Polyester Dress (Black)", 50, "Women", 22, "Sleek black polyester dress — effortlessly chic for any occasion.", "attached_assets/womens_s_polyester_dress_black.png", null, ["S", "M", "L", "XL"], 4.5, 74, 1, 0],
-  ["Women's Leather Jacket with Fur (Brown)", 190.99, "Women", 8, "Premium brown leather jacket with luxurious fur trim.", "attached_assets/womens_s_leather_jacket_fur_brown_s-m-l.png", 280, ["S", "M", "L"], 4.9, 145, 0, 1],
-  ["Women's Leather Jacket with Fur", 190.99, "Women", 6, "Edgy leather jacket with plush fur collar.", "attached_assets/womens_s_leather_jacket_fur_s-m-l.png", null, ["S", "M", "L"], 4.8, 97, 1, 0],
-  ["Men's Polo Neck (White)", 90.99, "Men", 25, "Classic white polo neck in a slim-fit knit.", "attached_assets/mens_s_polo_neck_white_s-ml-x.png", 130, ["S", "M", "L", "XL"], 4.8, 156, 1, 1],
-  ["Men's Polo Neck (Black)", 90.99, "Men", 20, "Sharp black polo neck — a timeless essential for the modern man.", "attached_assets/mens_s_polo_neck_black.png", null, ["S", "M", "L", "XL"], 4.7, 121, 0, 1],
-  ["Total Fitness Academy T-Shirt", 90.99, "Men", 30, "Unisex performance T-shirt, great for training or casual wear.", "attached_assets/unisex_tshirt.png", null, ["S", "M", "L", "XL"], 4.6, 89, 1, 0],
-  ["Men's Brown Leather Sneakers", 399.99, "Shoes", 12, "Premium brown leather sneakers with a clean white sole.", "attached_assets/mens_s_shoe_brown_6-7-8-9-10.jpg", 550, ["6", "7", "8", "9", "10"], 4.9, 178, 1, 1],
-  ["Men's Kicks (Bhoboze)", 399.99, "Shoes", 15, "Bold street-style kicks with a chunky sole.", "attached_assets/mens_kick_bhoboze_5-6-7-8-9-10-11.jpg", null, ["5", "6", "7", "8", "9", "10", "11"], 4.7, 63, 1, 0],
-  ["Women's Sneakers", 399.99, "Shoes", 18, "Comfortable everyday women's sneakers with a cushioned sole.", "attached_assets/womens_s_sneakers.avif", null, ["4", "5", "6", "7", "8"], 4.6, 92, 0, 1],
-  ["Women's Shoe (Green)", 399.99, "Shoes", 10, "Vibrant green women's shoes that add a pop of colour.", "attached_assets/womens_s_shoe_green_2-3-4-5-6-7.jpg", 480, ["2", "3", "4", "5", "6", "7"], 4.5, 54, 0, 0],
-  ["Brown Sandals", 159, "Shoes", 20, "Designer-inspired brown sandals with gold buckle detail.", "attached_assets/sandals_brown.jpg", null, ["3", "4", "5", "6", "7", "8", "9"], 4.7, 110, 0, 1],
-  ["Women's Sandals (White)", 159, "Shoes", 14, "Clean white women's sandals — perfect for summer days.", "attached_assets/womens_s_sadals-white_size_3-8.png", 220, ["3", "4", "5", "6", "7", "8"], 4.6, 77, 1, 0],
-  ["Ladies Sport Shoes (Pink)", 399.99, "Shoes", 16, "Sporty pink ladies' sneakers with a lightweight design.", "attached_assets/ladies_sport_shoes_pink.jpg", null, ["1", "2", "3", "4", "5", "6"], 4.8, 134, 1, 0],
-  ["Wireless Earbuds", 449.99, "Electronics", 18, "Compact Bluetooth earbuds with a charging case, clear sound, and a comfortable fit for everyday listening.", "https://images.unsplash.com/photo-1606220945770-b5b6c2c55bf1?auto=format&fit=crop&w=800&q=85", 599.99, ["One Size"], 4.7, 86, 1, 1],
-  ["Smartwatch Pro", 899.99, "Electronics", 10, "Modern fitness smartwatch with heart-rate tracking, activity goals, notifications, and a bright touchscreen.", "https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=800&q=85", 1199.99, ["One Size"], 4.6, 64, 1, 1],
-  ["Portable Bluetooth Speaker", 699.99, "Electronics", 12, "Portable wireless speaker with rich sound, deep bass, and a long-lasting battery for home or outdoor listening.", "https://images.unsplash.com/photo-1608043152269-423dbba4e7e1?auto=format&fit=crop&w=800&q=85", null, ["One Size"], 4.8, 103, 0, 1],
-  ["Fast Charging Powerbank", 549.99, "Electronics", 22, "High-capacity powerbank with fast USB-C charging to keep phones and devices powered throughout the day.", "https://images.unsplash.com/photo-1609592424716-8cc3f7a6a6f7?auto=format&fit=crop&w=800&q=85", 749.99, ["One Size"], 4.5, 51, 1, 0],
-  ["LED Desk Lamp", 299.99, "Electronics", 16, "Adjustable LED desk lamp with warm and cool light settings, ideal for study, work, or bedside use.", "https://images.unsplash.com/photo-1507473885765-e6ed057f782c?auto=format&fit=crop&w=800&q=85", null, ["One Size"], 4.6, 42, 0, 0],
-  ["Wireless Headphones", 799.99, "Electronics", 9, "Over-ear wireless headphones with soft cushions, immersive audio, and reliable Bluetooth connectivity.", "https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=800&q=85", 999.99, ["One Size"], 4.7, 72, 1, 0],
-  ["USB-C Car Charger", 249.99, "Electronics", 25, "Dual-port fast car charger for safely charging phones and tablets on the road.", "https://images.unsplash.com/photo-1617886322168-72b886573c42?auto=format&fit=crop&w=800&q=85", null, ["One Size"], 4.4, 28, 0, 0],
-];
-
 for (const alter of [
   "ALTER TABLE orders ADD COLUMN payment_method TEXT NOT NULL DEFAULT 'yoco'",
   "ALTER TABLE products ADD COLUMN lead_time TEXT NOT NULL DEFAULT '3-5 business days'",
@@ -336,20 +313,15 @@ for (const alter of [
   }
 }
 
-{
-  const insert = db.prepare(`
-    INSERT INTO products
-      (title, price, category, stock, description, image_url, original_price, sizes_json, rating, reviews, is_new, is_featured)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  const exists = db.prepare("SELECT id FROM products WHERE title = ?");
-  const seed = db.transaction(() => {
-    for (const product of seedProducts) {
-      if (!exists.get(product[0])) insert.run(...product.slice(0, 7), JSON.stringify(product[7]), ...product.slice(8));
-    }
-  });
-  seed();
-}
+// One-time cleanup: earlier versions of this app auto-seeded demo/mock products
+// (hardcoded "attached_assets/*" images and Unsplash placeholder photos) on first
+// boot. No real admin-uploaded product can ever have an image_url matching these
+// exact patterns (uploads are always saved under /uploads/, per imageUpload
+// below), so it's safe to permanently remove any leftover rows from that old
+// seed — this runs once per boot and is a no-op once they're gone.
+db.prepare(
+  "DELETE FROM products WHERE image_url LIKE 'attached_assets/%' OR image_url LIKE 'https://images.unsplash.com%'"
+).run();
 
 function serializeProduct(row) {
   return {
@@ -384,7 +356,6 @@ function allProducts(category) {
   return rows.map(serializeProduct);
 }
 
-app.use("/attached_assets", express.static(path.join(ROOT, "attached_assets"), { maxAge: "1d" }));
 app.use("/uploads", express.static(UPLOAD_DIR, { maxAge: "1d" }));
 
 app.get("/api/health", (req, res) => res.json({ ok: true, database: "sqlite" }));

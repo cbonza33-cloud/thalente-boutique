@@ -48,18 +48,28 @@ anything long-lived, or add external object storage later.
    which sends `script-src 'self'` and `script-src-attr 'none'`. That silently blocked every
    inline `<script>` and inline `onclick`/`onerror` handler across `index.html`, `admin.html`,
    and `order-success.html` — with no visible error, just a page that never finished initializing.
-   Fixed by giving Helmet explicit CSP directives that allow this app's actual inline scripts and
-   the Unsplash host its seed images load from, while keeping everything else locked down.
+   Fixed by giving Helmet explicit CSP directives that allow this app's actual inline scripts,
+   while keeping everything else locked down.
 2. **PWA icons** — added `public/manifest.json` and a full icon set in `public/icons/` (192/512,
    including maskable variants, plus an iOS `apple-touch-icon` and desktop favicons), generated
    from the exact brand colors already used in `admin.html`'s TBAE wordmark. Linked from all
    three HTML pages' `<head>`.
+3. **Removed all demo/mock data** — deleted the hardcoded seed list of 22 products (which mixed
+   nonexistent `attached_assets/*` paths with Unsplash placeholder photos) and the startup code
+   that auto-inserted them. Added a one-time cleanup migration that removes any leftover rows
+   matching those old patterns from a database that already has them, so the storefront never
+   shows demo items even on an existing deployment. The catalog now starts genuinely empty and
+   is populated exclusively through the admin dashboard — the storefront shows a clear "No
+   products are available yet" message until then, never a placeholder.
 
 ## Project structure
-- `server.js` — Express server, SQLite schema/seed, product/admin/order APIs, Yoco integration, CSP config
-- `index.html` — the live storefront: splash screen, dynamic catalogue, cart/wishlist, checkout, manifest/icon links
+- `server.js` — Express server, SQLite schema, product/admin/order APIs, Yoco integration, CSP config
+- `index.html` — the live storefront: splash screen, dynamic catalogue (pulled exclusively from
+  `/api/products`), cart/wishlist, checkout, manifest/icon links
 - `admin.html` — owner dashboard, fully wired to the API; favicon/apple-touch-icon links added
 - `order-success.html` — order confirmation/receipt; favicon/apple-touch-icon links added
 - `public/manifest.json` / `public/icons/` — PWA manifest and generated icon set
-- `data/thalente.sqlite` — runtime database (created & seeded automatically, gitignored)
+- `public/uploads/` — admin-uploaded product photos (gitignored; not on the Render persistent disk — see note above)
+- `data/thalente.sqlite` — runtime database (created automatically, gitignored; starts with zero
+  products until added via `/admin`)
 - `deepseek_html_20260731_90dbdd (1).html` — superseded draft, kept only for reference; no longer served

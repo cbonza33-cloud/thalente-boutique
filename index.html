@@ -724,9 +724,14 @@
 
     var grid = $("#product-grid");
     if (!list.length) {
-      grid.innerHTML = '<div class="empty-state"><div class="emoji">' + (currentView === "wishlist" ? "♡" : "🔍") + "</div>" +
-        "<p>" + (currentView === "wishlist" ? "Your wishlist is empty. Tap the heart on any product to save it." :
-        "No products match your search.") + "</p></div>";
+      var emptyEmoji = currentView === "wishlist" ? "♡" : (PRODUCTS.length === 0 ? "🛍️" : "🔍");
+      var emptyMessage = currentView === "wishlist"
+        ? "Your wishlist is empty. Tap the heart on any product to save it."
+        : (PRODUCTS.length === 0
+          ? "No products are available yet. Please check back soon."
+          : "No products match your search.");
+      grid.innerHTML = '<div class="empty-state"><div class="emoji">' + emptyEmoji + "</div>" +
+        "<p>" + emptyMessage + "</p></div>";
       return;
     }
     grid.innerHTML = list.map(function (p) {
