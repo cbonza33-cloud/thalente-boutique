@@ -98,6 +98,7 @@
     } 
     
     .thumb { width: 44px; height: 52px; object-fit: cover; border-radius: 7px; vertical-align: middle; } 
+    .thumb-fallback { display: inline-flex; align-items: center; justify-content: center; background: #f1ede3; font-size: 20px; }
     .low { color: #9e4e32; font-weight: 700; } 
     .actions { display: flex; gap: 6px; flex-wrap: wrap; } 
     .actions button { padding: 6px 9px; font-size: .85rem; }
@@ -451,7 +452,7 @@
       
       $("#productsBody").innerHTML = view.map(p => `
         <tr>
-          <td>${p.image ? `<img class="thumb" src="${p.image}" alt="">` : ''} ${p.title}</td>
+          <td>${p.image ? `<img class="thumb" src="${p.image}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('span'),{className:'thumb thumb-fallback',textContent:'🖼️'}))">` : ''} ${p.title}</td>
           <td>${p.category}</td>
           <td>${money(p.price)}</td>
           <td class="${p.stock < 3 ? 'low' : ''}">${p.stock === 0 ? 'Out of stock' : p.stock}</td>
@@ -553,19 +554,36 @@
     
     $("#productForm").onsubmit = async e => {
       e.preventDefault();
-      const f = new FormData(e.target);
-      const data = Object.fromEntries(f);
-      
-      data.price = Number(data.price);
-      data.stock = Number(data.stock);
-      data.original_price = data.original_price ? Number(data.original_price) : null;
-      data.sizes = data.sizes.split(",").map(x => x.trim()).filter(Boolean);
-      
+      const form = e.target;
+      const id = form.elements.id.value;
+      const endpoint = id ? `/api/products/${id}` : "/api/products";
+      const method = id ? "PUT" : "POST";
+      const fileInput = form.elements.image;
+      const hasFile = fileInput && fileInput.files && fileInput.files.length > 0;
+
       try {
-        await api(data.id ? `/api/products/${data.id}` : "/api/products", {
-          method: data.id ? "PUT" : "POST", 
-          body: JSON.stringify(data)
-        });
+        if (hasFile) {
+          // A file was selected: this MUST stay multipart/form-data so multer
+          // actually receives the file bytes. Send the FormData object directly —
+          // never flatten it with Object.fromEntries()/JSON.stringify(), and never
+          // set a Content-Type header here; the browser generates the correct
+          // "multipart/form-data; boundary=..." value itself. Setting
+          // "Content-Type: application/json" (what the shared api() helper does)
+          // on a multipart request is exactly what silently broke uploads before.
+          const formData = new FormData(form);
+          const response = await fetch(endpoint, { method, body: formData });
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(body.error || "Request failed");
+        } else {
+          // No file selected: keep using the existing JSON API path, unchanged.
+          const data = Object.fromEntries(new FormData(form));
+          delete data.image; // an empty file input still yields an empty File entry
+          data.price = Number(data.price);
+          data.stock = Number(data.stock);
+          data.original_price = data.original_price ? Number(data.original_price) : null;
+          data.sizes = data.sizes.split(",").map(x => x.trim()).filter(Boolean);
+          await api(endpoint, { method, body: JSON.stringify(data) });
+        }
         productDialog.close();
         showNotice("Inventory saved.");
         refresh();

@@ -7,6 +7,7 @@ const helmet = require("helmet");
 const cors = require("cors");
 const rateLimit = require("express-rate-limit");
 const multer = require("multer");
+const cloudinary = require("cloudinary").v2;
 
 const app = express();
 app.disable("x-powered-by");
@@ -19,6 +20,59 @@ const ROOT = __dirname;
 const ADMIN_PIN = process.env.ADMIN_PIN || "1234";
 if (!process.env.ADMIN_PIN) {
   console.warn("ADMIN_PIN environment variable not set. Using fallback PIN: '1234'");
+}
+
+// Cloudinary is the permanent store for product photos (Render's own filesystem
+// is wiped on every redeploy, so local disk can never hold uploaded images
+// reliably). Credentials come from environment variables ONLY — never hardcode
+// them here or commit them anywhere.
+const CLOUDINARY_CONFIGURED = Boolean(
+  process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET
+);
+if (CLOUDINARY_CONFIGURED) {
+  cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+    secure: true,
+  });
+} else {
+  console.warn(
+    "CLOUDINARY_CLOUD_NAME / CLOUDINARY_API_KEY / CLOUDINARY_API_SECRET are not all set. " +
+    "Product image uploads will be rejected with a clear error until they are configured " +
+    "(pasting an external image URL still works without Cloudinary)."
+  );
+}
+
+/**
+ * Uploads a file buffer to Cloudinary and resolves with its secure HTTPS URL.
+ * Rejects on failure — callers must not create/update a product on rejection.
+ */
+function uploadImageBufferToCloudinary(buffer) {
+  return new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      { folder: "thalente-products", resource_type: "image" },
+      (error, result) => {
+        if (error || !result || !result.secure_url) {
+          return reject(error || new Error("Cloudinary did not return an image URL."));
+        }
+        resolve(result.secure_url);
+      }
+    );
+    stream.end(buffer);
+  });
+}
+
+// Cloudinary URLs look like: https://res.cloudinary.com/<cloud>/image/upload/.../thalente-products/<id>.<ext>
+// This lets us best-effort delete a replaced image's old Cloudinary asset without
+// needing a separate database column to track its public_id.
+function extractCloudinaryPublicId(url) {
+  const match = /\/upload\/(?:v\d+\/)?(.+)\.[a-zA-Z0-9]+$/.exec(String(url || ""));
+  return match ? match[1] : null;
+}
+
+function isLegacyLocalImagePath(url) {
+  return typeof url === "string" && url.startsWith("/uploads/");
 }
 
 const allowedOrigins = new Set([
@@ -117,10 +171,24 @@ function typeFilter(allowedMimes, allowedExts) {
 }
 
 const imageUpload = multer({
-  storage: diskStorage(UPLOAD_DIR),
+  // Product photos are buffered in memory, then streamed straight to Cloudinary —
+  // never written to local disk, since Render's filesystem doesn't survive a redeploy.
+  storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: typeFilter(IMAGE_TYPES, IMAGE_EXTS),
 });
+
+// Multer's fileFilter only sees the client-supplied MIME type/extension, which a
+// client can misrepresent. Once the buffer is fully in memory, this checks the
+// actual file signature ("magic bytes") so a mislabeled or malicious file can't
+// pass as an image just because it claimed to be one.
+function sniffImageMimeType(buffer) {
+  if (!buffer || buffer.length < 12) return null;
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return "image/jpeg";
+  if (buffer.slice(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+  if (buffer.slice(0, 4).toString("ascii") === "RIFF" && buffer.slice(8, 12).toString("ascii") === "WEBP") return "image/webp";
+  return null;
+}
 
 const portfolioUpload = multer({
   storage: diskStorage(QUOTE_UPLOAD_DIR),
@@ -346,6 +414,10 @@ function serializeProduct(row) {
     stock: row.stock,
     images: row.image_url ? [row.image_url] : [],
     badge: row.original_price && row.original_price > row.price ? "Sale" : null,
+    // True for products still pointing at a pre-Cloudinary local /uploads/ path.
+    // These may 404 after a Render redeploy wipes the filesystem; the image will
+    // start working permanently again once the product's photo is re-uploaded.
+    legacyLocalImage: isLegacyLocalImagePath(row.image_url),
   };
 }
 
@@ -376,31 +448,79 @@ app.get("/api/admin/session", requireAdmin, (req, res) => res.json({ ok: true })
 
 app.get("/api/products", (req, res) => res.json(allProducts(req.query.category)));
 
-app.post("/api/products", requireAdmin, multerSingle(imageUpload, "image"), (req, res) => {
-  const product = validateProduct(req.body, { uploadedUrl: req.file ? `/uploads/${req.file.filename}` : "" });
-  if (!product.ok) return res.status(400).json({ error: product.error });
-  const result = db.prepare(`
-    INSERT INTO products (title, price, category, stock, description, image_url, original_price, sizes_json, is_new, is_featured, lead_time)
-    VALUES (@title, @price, @category, @stock, @description, @image_url, @original_price, @sizes_json, @is_new, @is_featured, @lead_time)
-  `).run(product.value);
-  res.status(201).json(serializeProduct(db.prepare("SELECT * FROM products WHERE id = ?").get(result.lastInsertRowid)));
+app.post("/api/products", requireAdmin, multerSingle(imageUpload, "image"), async (req, res) => {
+  try {
+    const uploadedUrl = await resolveUploadedImageUrl(req.file);
+    const product = validateProduct(req.body, { uploadedUrl });
+    if (!product.ok) return res.status(400).json({ error: product.error });
+    const result = db.prepare(`
+      INSERT INTO products (title, price, category, stock, description, image_url, original_price, sizes_json, is_new, is_featured, lead_time)
+      VALUES (@title, @price, @category, @stock, @description, @image_url, @original_price, @sizes_json, @is_new, @is_featured, @lead_time)
+    `).run(product.value);
+    res.status(201).json(serializeProduct(db.prepare("SELECT * FROM products WHERE id = ?").get(result.lastInsertRowid)));
+  } catch (error) {
+    res.status(error.status || 502).json({ error: error.message || "Image upload failed." });
+  }
 });
 
-app.put("/api/products/:id", requireAdmin, multerSingle(imageUpload, "image"), (req, res) => {
+app.put("/api/products/:id", requireAdmin, multerSingle(imageUpload, "image"), async (req, res) => {
   const existing = db.prepare("SELECT * FROM products WHERE id = ?").get(Number(req.params.id));
   if (!existing) return res.status(404).json({ error: "Product not found" });
-  const product = validateProduct(req.body, {
-    uploadedUrl: req.file ? `/uploads/${req.file.filename}` : "",
-    existingUrl: existing.image_url,
-  });
-  if (!product.ok) return res.status(400).json({ error: product.error });
-  db.prepare(`
-    UPDATE products SET title=@title, price=@price, category=@category, stock=@stock,
-      description=@description, image_url=@image_url, original_price=@original_price,
-      sizes_json=@sizes_json, is_new=@is_new, is_featured=@is_featured, lead_time=@lead_time WHERE id=@id
-  `).run({ ...product.value, id: Number(req.params.id) });
-  res.json(serializeProduct(db.prepare("SELECT * FROM products WHERE id = ?").get(req.params.id)));
+  try {
+    const uploadedUrl = await resolveUploadedImageUrl(req.file);
+    const product = validateProduct(req.body, { uploadedUrl, existingUrl: existing.image_url });
+    if (!product.ok) return res.status(400).json({ error: product.error });
+    db.prepare(`
+      UPDATE products SET title=@title, price=@price, category=@category, stock=@stock,
+        description=@description, image_url=@image_url, original_price=@original_price,
+        sizes_json=@sizes_json, is_new=@is_new, is_featured=@is_featured, lead_time=@lead_time WHERE id=@id
+    `).run({ ...product.value, id: Number(req.params.id) });
+    // Best-effort cleanup of the replaced image. This never blocks or fails the
+    // update itself — if it doesn't work, the product update has already succeeded.
+    if (uploadedUrl && uploadedUrl !== existing.image_url) {
+      const oldPublicId = CLOUDINARY_CONFIGURED ? extractCloudinaryPublicId(existing.image_url) : null;
+      if (oldPublicId) {
+        cloudinary.uploader.destroy(oldPublicId).catch(error => {
+          console.warn(`Could not delete replaced Cloudinary asset ${oldPublicId}:`, error.message);
+        });
+      }
+    }
+    res.json(serializeProduct(db.prepare("SELECT * FROM products WHERE id = ?").get(req.params.id)));
+  } catch (error) {
+    res.status(error.status || 502).json({ error: error.message || "Image upload failed." });
+  }
 });
+
+/**
+ * Resolves the uploaded multer file (if any) to a permanent Cloudinary HTTPS URL.
+ * Returns "" when no file was uploaded (caller then falls back to a manually
+ * typed image_url or the existing image on an edit). Throws — never returns a
+ * broken/placeholder URL — if a file was uploaded but can't be safely stored.
+ */
+async function resolveUploadedImageUrl(file) {
+  if (!file) return "";
+  const realType = sniffImageMimeType(file.buffer);
+  if (!realType) {
+    const error = new Error("The uploaded file is not a valid JPEG, PNG, or WebP image.");
+    error.status = 400;
+    throw error;
+  }
+  if (!CLOUDINARY_CONFIGURED) {
+    const error = new Error(
+      "Image uploads are not available right now: CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, " +
+      "and CLOUDINARY_API_SECRET must be set. Paste an external image URL instead, or configure Cloudinary."
+    );
+    error.status = 503;
+    throw error;
+  }
+  try {
+    return await uploadImageBufferToCloudinary(file.buffer);
+  } catch (error) {
+    const wrapped = new Error("Cloudinary upload failed: " + (error.message || "unknown error"));
+    wrapped.status = 502;
+    throw wrapped;
+  }
+}
 
 app.delete("/api/products/:id", requireAdmin, (req, res) => {
   const result = db.prepare("DELETE FROM products WHERE id = ?").run(Number(req.params.id));
@@ -418,12 +538,16 @@ function validateProduct(input = {}, { uploadedUrl = "", existingUrl = "" } = {}
   }
   const defaultLead = category === "Electronics" ? "5-7 business days" : "3-5 business days";
   const leadTime = String(input.lead_time || input.leadTime || "").trim() || defaultLead;
+  // Only a genuine string typed into the "Image URL" field is accepted here —
+  // never anything else — so a malformed request can never corrupt image_url
+  // into a stringified object (e.g. the literal text "[object Object]").
+  const typedUrl = typeof input.image_url === "string" ? input.image_url.trim() : "";
   return {
     ok: true,
     value: {
       title, category, price, stock,
       description: String(input.description || "").trim(),
-      image_url: uploadedUrl || String(input.image_url || input.image || "").trim() || existingUrl,
+      image_url: uploadedUrl || typedUrl || existingUrl,
       original_price: input.original_price == null || input.original_price === "" ? null : Number(input.original_price),
       sizes_json: JSON.stringify(Array.isArray(input.sizes) ? input.sizes : String(input.sizes || "").split(",").map(s => s.trim()).filter(Boolean)),
       is_new: input.is_new === "1" || input.is_new === "true" || input.is_new === true || input.is_new === 1 ? 1 : 0,

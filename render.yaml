@@ -22,12 +22,21 @@ services:
       # Your live Render URL, e.g. https://thalente-boutique-electronics.onrender.com
       - key: ALLOWED_ORIGIN
         sync: false
+      # Required for product image uploads to work (see README.md for setup).
+      # Get these three from your Cloudinary dashboard: https://cloudinary.com/console
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
     # Persists the SQLite database (products, orders, receipts, notifications)
-    # across deploys and restarts. Note: Render only allows one disk per
-    # service, so files uploaded through the admin panel to public/uploads
-    # (custom product photos, quote portfolios) are NOT covered by this disk
-    # and will be lost on redeploy — use image URLs for anything that must
-    # survive a redeploy, or move uploads to S3/Cloudinary later.
+    # across deploys and restarts. Render only allows one disk per service, so
+    # public/uploads is intentionally NOT on this disk and is NOT used for
+    # permanent product photos — those are stored on Cloudinary instead (see
+    # CLOUDINARY_* vars above), which is unaffected by redeploys. public/uploads
+    # is still used for quote-request portfolio attachments only, which remain
+    # ephemeral (out of scope for the product-image fix).
     disk:
       name: thalente-data
       mountPath: /opt/render/project/src/data
