@@ -239,14 +239,16 @@
     font-size: 0.62rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.04em; z-index: 2;
   }
   .badge-new { background: var(--green); color: #fff; }
-  .badge-sale { background: var(--red); color: #fff; }
+  .badge-sale { background: linear-gradient(135deg, var(--red), #a8323f); color: #fff; box-shadow: 0 3px 10px rgba(201,69,90,0.4); }
   .badge-oos { background: rgba(36,31,30,0.85); color: #fff; }
   .product-info { padding: 10px 12px 12px; flex: 1; display: flex; flex-direction: column; gap: 3px; }
   .product-brand { font-size: 0.66rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
   .product-name { font-size: 0.86rem; font-weight: 700; line-height: 1.25; }
   .product-price-row { display: flex; align-items: baseline; gap: 6px; margin-top: 2px; }
   .product-price { font-size: 0.92rem; font-weight: 800; color: var(--gold); }
+  .product-price.on-sale { color: var(--red); }
   .product-price-original { font-size: 0.74rem; color: var(--text-muted); text-decoration: line-through; }
+  .product-savings { font-size: 0.66rem; font-weight: 700; color: var(--green); }
   .product-rating { font-size: 0.7rem; color: var(--text-muted); margin-top: 1px; }
 
   .empty-state, .skeleton-note { text-align: center; padding: 50px 20px; color: var(--text-muted); grid-column: 1 / -1; }
@@ -297,6 +299,7 @@
   .modal-brand { font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
   .modal-price-row { display: flex; align-items: baseline; gap: 10px; margin: 10px 0 6px; }
   .modal-price { font-size: 1.3rem; font-weight: 800; color: var(--gold); }
+  .modal-price.on-sale { color: var(--red); }
   .modal-price-original { font-size: 0.95rem; color: var(--text-muted); text-decoration: line-through; }
   .modal-meta-row { display: flex; gap: 14px; font-size: 0.78rem; color: var(--text-muted); margin-bottom: 14px; flex-wrap: wrap; }
   .stock-pill { font-weight: 700; }
@@ -483,7 +486,6 @@
       <button class="nav-item" data-nav="search"><span class="nav-icon">🔍</span>Search</button>
       <button class="nav-item" data-nav="wishlist"><span class="nav-icon">♡</span>Wishlist<span class="nav-badge" id="wishlist-nav-badge"></span></button>
       <button class="nav-item" data-nav="cart"><span class="nav-icon">🛍️</span>Cart<span class="nav-badge" id="cart-nav-badge"></span></button>
-      <a class="nav-item" href="/admin" data-nav="admin"><span class="nav-icon">👤</span>Admin</a>
     </nav>
   </div>
 
@@ -503,6 +505,7 @@
         <span class="modal-price" id="modal-price"></span>
         <span class="modal-price-original" id="modal-price-original"></span>
       </div>
+      <div class="product-savings" id="modal-savings" style="margin-bottom:6px;"></div>
       <div class="modal-meta-row">
         <span id="modal-rating"></span>
         <span id="modal-stock"></span>
@@ -587,6 +590,9 @@
   }
   function saveJSON(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) {} }
   function money(n) { return "R" + Number(n || 0).toFixed(2); }
+  function discountPercent(p) {
+    return (p.originalPrice && p.originalPrice > p.price) ? Math.round((1 - p.price / p.originalPrice) * 100) : 0;
+  }
   var $ = function (sel) { return document.querySelector(sel); };
   var $$ = function (sel) { return Array.prototype.slice.call(document.querySelectorAll(sel)); };
 
@@ -736,11 +742,13 @@
     }
     grid.innerHTML = list.map(function (p) {
       var isWished = wishlist.indexOf(p.id) !== -1;
+      var pct = discountPercent(p);
       var badge = p.stock === 0 ? '<span class="badge-corner badge-oos">Sold Out</span>' :
-        (p.badge === "Sale" ? '<span class="badge-corner badge-sale">Sale</span>' :
+        (pct > 0 ? '<span class="badge-corner badge-sale">-' + pct + '%</span>' :
         (p.isNew ? '<span class="badge-corner badge-new">New</span>' : ""));
-      var priceRow = '<span class="product-price">' + money(p.price) + "</span>" +
-        (p.originalPrice && p.originalPrice > p.price ? '<span class="product-price-original">' + money(p.originalPrice) + "</span>" : "");
+      var priceRow = '<span class="product-price' + (pct > 0 ? " on-sale" : "") + '">' + money(p.price) + "</span>" +
+        (pct > 0 ? '<span class="product-price-original">' + money(p.originalPrice) + "</span>" : "");
+      var savingsRow = pct > 0 ? '<div class="product-savings">Save ' + money(p.originalPrice - p.price) + "</div>" : "";
       return '' +
         '<div class="product-card" data-id="' + p.id + '">' +
           '<div class="product-image">' +
@@ -752,6 +760,7 @@
             '<div class="product-brand">' + (p.brand || "Thalente") + "</div>" +
             '<div class="product-name">' + escapeHtml(p.title) + "</div>" +
             '<div class="product-price-row">' + priceRow + "</div>" +
+            savingsRow +
             '<div class="product-rating">⭐ ' + Number(p.rating || 0).toFixed(1) + " (" + (p.reviews || 0) + ")</div>" +
           "</div>" +
         "</div>";
@@ -821,7 +830,9 @@
     $("#modal-brand").textContent = p.brand || "Thalente";
     $("#modal-title").textContent = p.title;
     $("#modal-price").textContent = money(p.price);
+    $("#modal-price").classList.toggle("on-sale", discountPercent(p) > 0);
     $("#modal-price-original").textContent = (p.originalPrice && p.originalPrice > p.price) ? money(p.originalPrice) : "";
+    $("#modal-savings").textContent = discountPercent(p) > 0 ? "Save " + money(p.originalPrice - p.price) + " (" + discountPercent(p) + "% off)" : "";
     $("#modal-rating").textContent = "⭐ " + Number(p.rating || 0).toFixed(1) + " (" + (p.reviews || 0) + " reviews)";
     $("#modal-lead").textContent = "🚚 " + (p.leadTime || "3-5 business days");
     var stockEl = $("#modal-stock");
