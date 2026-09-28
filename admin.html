@@ -375,7 +375,20 @@
     const money = n => `R${Number(n).toFixed(2)}`;
     
     async function api(url, options) {
-      const r = await fetch(url, { headers: {"Content-Type":"application/json"}, ...options });
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 60000);
+      let r;
+      try {
+        r = await fetch(url, { headers: {"Content-Type":"application/json"}, signal: controller.signal, ...options });
+      } catch (err) {
+        throw new Error(err.name === "AbortError" ? SLOW_SERVER_MESSAGE : err.message);
+      } finally {
+        clearTimeout(timer);
+      }
+      if (r.status === 401 && url !== "/api/admin/verify-pin") {
+        sessionExpired();
+        throw new Error(SESSION_EXPIRED_MESSAGE);
+      }
       if (r.status === 204) return null;
       const body = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(body.error || "Request failed");
@@ -423,6 +436,18 @@
       }
     }
     
+    const SLOW_SERVER_MESSAGE = "The server took too long to respond. It may be waking up — wait a moment and try again.";
+    const SESSION_EXPIRED_MESSAGE = "Your session expired (the server restarted). Please enter your PIN again.";
+    // The server keeps admin sessions in memory, so a restart (frequent on Render's
+    // free tier) logs the owner out server-side. Without this the dashboard kept
+    // looking unlocked while every Save silently failed.
+    function sessionExpired() {
+      if (sessionStorage.getItem(AUTH_KEY) !== "true") return;
+      if (productDialog.open) productDialog.close();
+      logout();
+      pinError.textContent = SESSION_EXPIRED_MESSAGE;
+    }
+
     function logout() {
       sessionStorage.removeItem(AUTH_KEY);
       pinForm.reset();
@@ -555,6 +580,10 @@
     $("#productForm").onsubmit = async e => {
       e.preventDefault();
       const form = e.target;
+      const saveButton = form.querySelector('button[type="submit"]');
+      const idleLabel = saveButton.textContent;
+      saveButton.disabled = true; // also prevents double-submits creating duplicate products
+      saveButton.textContent = "Saving…";
       const id = form.elements.id.value;
       const endpoint = id ? `/api/products/${id}` : "/api/products";
       const method = id ? "PUT" : "POST";
@@ -564,15 +593,21 @@
       try {
         if (hasFile) {
           // A file was selected: this MUST stay multipart/form-data so multer
-          // actually receives the file bytes. Send the FormData object directly —
-          // never flatten it with Object.fromEntries()/JSON.stringify(), and never
-          // set a Content-Type header here; the browser generates the correct
-          // "multipart/form-data; boundary=..." value itself. Setting
-          // "Content-Type: application/json" (what the shared api() helper does)
-          // on a multipart request is exactly what silently broke uploads before.
+          // actually receives the file bytes. Send the FormData object directly and
+          // never set a Content-Type header — the browser adds the multipart boundary.
           const formData = new FormData(form);
-          const response = await fetch(endpoint, { method, body: formData });
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 90000);
+          let response;
+          try {
+            response = await fetch(endpoint, { method, body: formData, signal: controller.signal });
+          } catch (err) {
+            throw new Error(err.name === "AbortError" ? SLOW_SERVER_MESSAGE : err.message);
+          } finally {
+            clearTimeout(timer);
+          }
           const body = await response.json().catch(() => ({}));
+          if (response.status === 401) { sessionExpired(); throw new Error(SESSION_EXPIRED_MESSAGE); }
           if (!response.ok) throw new Error(body.error || "Request failed");
         } else {
           // No file selected: keep using the existing JSON API path, unchanged.
@@ -586,9 +621,12 @@
         }
         productDialog.close();
         showNotice("Inventory saved.");
-        refresh();
+        refresh().catch(() => {});
       } catch(err) {
         showNotice(err.message);
+      } finally {
+        saveButton.disabled = false;
+        saveButton.textContent = idleLabel;
       }
     };
     

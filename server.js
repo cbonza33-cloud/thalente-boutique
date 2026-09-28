@@ -7,7 +7,7 @@ const helmet = require("helmet");
 const cors = require("cors");
 const rateLimit = require("express-rate-limit");
 const multer = require("multer");
-const cloudinary = require("cloudinary").v2;
+const { createClient } = require("@supabase/supabase-js");
 
 const app = express();
 app.disable("x-powered-by");
@@ -22,53 +22,63 @@ if (!process.env.ADMIN_PIN) {
   console.warn("ADMIN_PIN environment variable not set. Using fallback PIN: '1234'");
 }
 
-// Cloudinary is the permanent store for product photos (Render's own filesystem
-// is wiped on every redeploy, so local disk can never hold uploaded images
-// reliably). Credentials come from environment variables ONLY — never hardcode
-// them here or commit them anywhere.
-const CLOUDINARY_CONFIGURED = Boolean(
-  process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET
-);
-if (CLOUDINARY_CONFIGURED) {
-  cloudinary.config({
-    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-    api_key: process.env.CLOUDINARY_API_KEY,
-    api_secret: process.env.CLOUDINARY_API_SECRET,
-    secure: true,
-  });
-} else {
+// Supabase Storage is the permanent store for product photos (Render's own
+// filesystem is wiped on every redeploy, so local disk can never hold uploaded
+// images reliably). Credentials come from environment variables ONLY — never
+// hardcode them here or commit them anywhere. The service role key is used
+// exclusively in this server-side file and is never sent to the browser.
+const SUPABASE_BUCKET = "Thalente uploads";
+const SUPABASE_CONFIGURED = Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+const supabase = SUPABASE_CONFIGURED
+  ? createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY)
+  : null;
+if (!SUPABASE_CONFIGURED) {
   console.warn(
-    "CLOUDINARY_CLOUD_NAME / CLOUDINARY_API_KEY / CLOUDINARY_API_SECRET are not all set. " +
+    "SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY are not both set. " +
     "Product image uploads will be rejected with a clear error until they are configured " +
-    "(pasting an external image URL still works without Cloudinary)."
+    "(pasting an external image URL still works without Supabase)."
   );
 }
 
 /**
- * Uploads a file buffer to Cloudinary and resolves with its secure HTTPS URL.
- * Rejects on failure — callers must not create/update a product on rejection.
+ * Uploads a file buffer to the Supabase Storage bucket and resolves with its
+ * permanent public HTTPS URL. Rejects with Supabase's own error message on
+ * failure — callers must not create/update a product on rejection.
  */
-function uploadImageBufferToCloudinary(buffer) {
-  return new Promise((resolve, reject) => {
-    const stream = cloudinary.uploader.upload_stream(
-      { folder: "thalente-products", resource_type: "image" },
-      (error, result) => {
-        if (error || !result || !result.secure_url) {
-          return reject(error || new Error("Cloudinary did not return an image URL."));
-        }
-        resolve(result.secure_url);
-      }
-    );
-    stream.end(buffer);
-  });
+async function uploadImageBufferToSupabase(buffer, mimeType) {
+  const ext = mimeType === "image/png" ? "png" : mimeType === "image/webp" ? "webp" : "jpg";
+  const objectPath = `products/${Date.now()}-${crypto.randomBytes(8).toString("hex")}.${ext}`;
+  const { error } = await supabase.storage
+    .from(SUPABASE_BUCKET)
+    .upload(objectPath, buffer, { contentType: mimeType, upsert: false });
+  if (error) {
+    throw new Error(error.message || "Supabase Storage upload failed.");
+  }
+  const { data } = supabase.storage.from(SUPABASE_BUCKET).getPublicUrl(objectPath);
+  if (!data || !data.publicUrl) {
+    throw new Error("Supabase Storage did not return a public URL.");
+  }
+  return data.publicUrl;
 }
 
-// Cloudinary URLs look like: https://res.cloudinary.com/<cloud>/image/upload/.../thalente-products/<id>.<ext>
-// This lets us best-effort delete a replaced image's old Cloudinary asset without
-// needing a separate database column to track its public_id.
-function extractCloudinaryPublicId(url) {
-  const match = /\/upload\/(?:v\d+\/)?(.+)\.[a-zA-Z0-9]+$/.exec(String(url || ""));
-  return match ? match[1] : null;
+// Supabase public URLs look like:
+// https://<project>.supabase.co/storage/v1/object/public/<bucket>/<objectPath>
+// This lets us best-effort delete a replaced image's old Storage object without
+// needing a separate database column to track its object path.
+function extractSupabasePath(url) {
+  const marker = `/object/public/${SUPABASE_BUCKET}/`;
+  const index = String(url || "").indexOf(marker);
+  return index === -1 ? null : url.slice(index + marker.length);
+}
+
+// The Supabase SDK's Storage calls have no timeout or abort option, so a stalled
+// network call would hang the request forever (the admin "Save" button appears
+// stuck). Every Supabase call the server awaits goes through this.
+const SUPABASE_TIMEOUT_MS = Number(process.env.SUPABASE_UPLOAD_TIMEOUT_MS || 25000);
+function withTimeout(promise, ms, message) {
+  let timer;
+  const timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), ms); });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 function isLegacyLocalImagePath(url) {
@@ -171,8 +181,9 @@ function typeFilter(allowedMimes, allowedExts) {
 }
 
 const imageUpload = multer({
-  // Product photos are buffered in memory, then streamed straight to Cloudinary —
-  // never written to local disk, since Render's filesystem doesn't survive a redeploy.
+  // Product photos are buffered in memory, then streamed straight to Supabase
+  // Storage — never written to local disk, since Render's filesystem doesn't
+  // survive a redeploy.
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: typeFilter(IMAGE_TYPES, IMAGE_EXTS),
@@ -304,7 +315,74 @@ app.use(express.static(path.join(ROOT, "public")));
 
 const DB_DIR = path.join(ROOT, "data");
 fs.mkdirSync(DB_DIR, { recursive: true });
-const db = new Database(path.join(DB_DIR, "thalente.sqlite"));
+const DB_FILE = path.join(DB_DIR, "thalente.sqlite");
+const NO_BACKUP_MARKER = path.join(DB_DIR, ".no-backup");
+
+// Render's free tier has no persistent disk: the local filesystem (including this
+// SQLite file) is wiped on every restart, redeploy and idle spin-down. So the
+// database is restored from a private Supabase Storage bucket before opening it,
+// and backed up again after every successful write (see runBackup below).
+try {
+  require("child_process").execFileSync(process.execPath, [path.join(ROOT, "restore-db.js")], { stdio: "inherit", timeout: 45000 });
+} catch (error) {
+  console.error("Database restore step failed — backups disabled for this run:", error.message);
+  try { fs.writeFileSync(NO_BACKUP_MARKER, "restore step failed"); } catch (_) {}
+}
+
+const db = new Database(DB_FILE);
+
+const BACKUP_BUCKET = "thalente-private-backup";
+const BACKUP_OBJECT = "thalente.sqlite";
+let backupTimer = null;
+let backupRunning = false;
+let backupAgain = false;
+let backupBucketReady = false;
+
+async function runBackup() {
+  if (!SUPABASE_CONFIGURED || fs.existsSync(NO_BACKUP_MARKER)) return;
+  if (backupRunning) { backupAgain = true; return; }
+  backupRunning = true;
+  try {
+    if (!backupBucketReady) {
+      // Private bucket (never public: the database contains customer details).
+      const { error } = await withTimeout(
+        supabase.storage.createBucket(BACKUP_BUCKET, { public: false }),
+        SUPABASE_TIMEOUT_MS, "Supabase did not respond while preparing the backup bucket."
+      );
+      if (error && !/already exists|duplicate|409/i.test(`${error.message} ${error.statusCode || ""}`)) throw new Error(error.message);
+      backupBucketReady = true;
+    }
+    db.pragma("wal_checkpoint(TRUNCATE)");
+    const snapshot = fs.readFileSync(DB_FILE);
+    const { error } = await withTimeout(
+      supabase.storage.from(BACKUP_BUCKET).upload(BACKUP_OBJECT, snapshot, { upsert: true, contentType: "application/octet-stream" }),
+      SUPABASE_TIMEOUT_MS, "Supabase did not respond while saving the database backup."
+    );
+    if (error) throw new Error(error.message);
+  } catch (error) {
+    console.warn("Database backup failed:", error.message);
+  } finally {
+    backupRunning = false;
+    if (backupAgain) { backupAgain = false; scheduleBackup(); }
+  }
+}
+function scheduleBackup() { clearTimeout(backupTimer); backupTimer = setTimeout(runBackup, 1500); }
+
+app.use((req, res, next) => {
+  if (req.method !== "GET" && req.method !== "HEAD" && req.method !== "OPTIONS") {
+    res.on("finish", () => { if (res.statusCode < 400) scheduleBackup(); });
+  }
+  next();
+});
+
+// Render sends SIGTERM before spinning down / redeploying: take a final snapshot.
+process.on("SIGTERM", async () => {
+  clearTimeout(backupTimer);
+  const deadline = Date.now() + 8000;
+  while (backupRunning && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 100));
+  await runBackup();
+  process.exit(0);
+});
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 
@@ -414,7 +492,7 @@ function serializeProduct(row) {
     stock: row.stock,
     images: row.image_url ? [row.image_url] : [],
     badge: row.original_price && row.original_price > row.price ? "Sale" : null,
-    // True for products still pointing at a pre-Cloudinary local /uploads/ path.
+    // True for products still pointing at a pre-Supabase local /uploads/ path.
     // These may 404 after a Render redeploy wipes the filesystem; the image will
     // start working permanently again once the product's photo is re-uploaded.
     legacyLocalImage: isLegacyLocalImagePath(row.image_url),
@@ -478,10 +556,10 @@ app.put("/api/products/:id", requireAdmin, multerSingle(imageUpload, "image"), a
     // Best-effort cleanup of the replaced image. This never blocks or fails the
     // update itself — if it doesn't work, the product update has already succeeded.
     if (uploadedUrl && uploadedUrl !== existing.image_url) {
-      const oldPublicId = CLOUDINARY_CONFIGURED ? extractCloudinaryPublicId(existing.image_url) : null;
-      if (oldPublicId) {
-        cloudinary.uploader.destroy(oldPublicId).catch(error => {
-          console.warn(`Could not delete replaced Cloudinary asset ${oldPublicId}:`, error.message);
+      const oldPath = SUPABASE_CONFIGURED ? extractSupabasePath(existing.image_url) : null;
+      if (oldPath) {
+        supabase.storage.from(SUPABASE_BUCKET).remove([oldPath]).then(({ error }) => {
+          if (error) console.warn(`Could not delete replaced Supabase Storage object ${oldPath}:`, error.message);
         });
       }
     }
@@ -492,10 +570,11 @@ app.put("/api/products/:id", requireAdmin, multerSingle(imageUpload, "image"), a
 });
 
 /**
- * Resolves the uploaded multer file (if any) to a permanent Cloudinary HTTPS URL.
- * Returns "" when no file was uploaded (caller then falls back to a manually
- * typed image_url or the existing image on an edit). Throws — never returns a
- * broken/placeholder URL — if a file was uploaded but can't be safely stored.
+ * Resolves the uploaded multer file (if any) to a permanent Supabase Storage
+ * public URL. Returns "" when no file was uploaded (caller then falls back to
+ * a manually typed image_url or the existing image on an edit). Throws — never
+ * returns a broken/placeholder URL — if a file was uploaded but can't be
+ * safely stored, surfacing Supabase's own error message where applicable.
  */
 async function resolveUploadedImageUrl(file) {
   if (!file) return "";
@@ -505,18 +584,22 @@ async function resolveUploadedImageUrl(file) {
     error.status = 400;
     throw error;
   }
-  if (!CLOUDINARY_CONFIGURED) {
+  if (!SUPABASE_CONFIGURED) {
     const error = new Error(
-      "Image uploads are not available right now: CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, " +
-      "and CLOUDINARY_API_SECRET must be set. Paste an external image URL instead, or configure Cloudinary."
+      "Image uploads are not available right now: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY " +
+      "must be set. Paste an external image URL instead, or configure Supabase."
     );
     error.status = 503;
     throw error;
   }
   try {
-    return await uploadImageBufferToCloudinary(file.buffer);
+    return await withTimeout(
+      uploadImageBufferToSupabase(file.buffer, realType),
+      SUPABASE_TIMEOUT_MS,
+      "Supabase Storage did not respond in time. Please try again."
+    );
   } catch (error) {
-    const wrapped = new Error("Cloudinary upload failed: " + (error.message || "unknown error"));
+    const wrapped = new Error("Supabase Storage upload failed: " + (error.message || "unknown error"));
     wrapped.status = 502;
     throw wrapped;
   }

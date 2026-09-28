@@ -23,18 +23,16 @@ services:
       - key: ALLOWED_ORIGIN
         sync: false
       # Required for product image uploads to work (see README.md for setup).
-      # Get these three from your Cloudinary dashboard: https://cloudinary.com/console
-      - key: CLOUDINARY_CLOUD_NAME
+      # Get these from your Supabase project settings.
+      - key: SUPABASE_URL
         sync: false
-      - key: CLOUDINARY_API_KEY
-        sync: false
-      - key: CLOUDINARY_API_SECRET
+      - key: SUPABASE_SERVICE_ROLE_KEY
         sync: false
     # Persists the SQLite database (products, orders, receipts, notifications)
     # across deploys and restarts. Render only allows one disk per service, so
     # public/uploads is intentionally NOT on this disk and is NOT used for
-    # permanent product photos — those are stored on Cloudinary instead (see
-    # CLOUDINARY_* vars above), which is unaffected by redeploys. public/uploads
+    # permanent product photos — those are stored in Supabase Storage instead
+    # (see SUPABASE_* vars above), which is unaffected by redeploys. public/uploads
     # is still used for quote-request portfolio attachments only, which remain
     # ephemeral (out of scope for the product-image fix).
     disk:

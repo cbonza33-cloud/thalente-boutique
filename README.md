@@ -27,44 +27,59 @@ Copy `.env.example` and set:
 - `ADMIN_PIN` — admin dashboard PIN (fallback `1234` if unset — **change this before going live**)
 - `YOCO_SECRET_KEY` — from your Yoco merchant dashboard; leave unset for demo mode
 - `ALLOWED_ORIGIN` / `ALLOWED_ORIGINS` — your deployed origin(s) for CORS
-- `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET` — required for
-  product image uploads (see below)
+- `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` — required for product image uploads (see below)
 
 Configure Yoco's webhook URL as `https://<your-app>/api/webhooks/yoco` once live.
 
-### Product images (Cloudinary)
-Product photos uploaded through `/admin` are stored permanently on
-[Cloudinary](https://cloudinary.com), not on Render's local disk — Render wipes its
-filesystem on every redeploy, so anything saved to `public/uploads/` would otherwise
-be lost the next time you deploy.
+### Product images (Supabase Storage)
+Product photos uploaded through `/admin` are stored permanently in a Supabase
+Storage bucket, not on Render's local disk — Render wipes its filesystem on every
+redeploy, so anything saved to `public/uploads/` would otherwise be lost the next
+time you deploy.
 
-1. Create a free Cloudinary account at https://cloudinary.com/console.
-2. From that dashboard, copy your **Cloud name**, **API Key**, and **API Secret**.
-3. Set them as `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET`
-   — in Render's dashboard for production, or your local `.env` for development.
-4. Without all three set, uploading a file returns a clear error asking you to
-   configure Cloudinary; pasting an external image URL in the "Image URL" field
-   still works either way and is never uploaded to Cloudinary.
+1. In your Supabase project, create a **public** Storage bucket named `Thalente uploads`
+   (already done if you're reading this after setup).
+2. From Project Settings → API, copy your **Project URL** and **service role key**
+   (not the anon key — the service role key is required for server-side uploads and
+   is never exposed to the browser).
+3. Set them as `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` — in Render's dashboard
+   for production, or your local `.env` for development.
+4. Without both set, uploading a file returns a clear error asking you to configure
+   Supabase; pasting an external image URL in the "Image URL" field still works
+   either way and is never uploaded to Supabase.
+5. If an upload fails for any other reason (e.g. a missing Storage policy), the
+   real error message from Supabase is returned to the admin dashboard rather than
+   being hidden — no broken or blank image is ever silently saved.
 
 **Existing products with an old `/uploads/...` image** (from before this fix) are left
 exactly as they are — they are not deleted, and the app will keep displaying them if
 that file still happens to exist on disk. They'll keep working normally once you
 re-upload or re-save their photo through the admin dashboard, which then stores a
-permanent Cloudinary URL going forward. No database migration is needed for this.
+permanent Supabase Storage URL going forward. No database migration is needed for this.
 
 ## Deploying to Render
 1. Push this repo to GitHub.
 2. In Render, "New +" → "Blueprint", point it at the repo — `render.yaml` configures
    everything (build/start commands, health check, persistent disk for the database).
-3. Set `ADMIN_PIN`, `YOCO_SECRET_KEY`, `ALLOWED_ORIGIN`, and the three `CLOUDINARY_*`
-   variables as prompted (they're marked `sync: false` so Render asks for them rather
-   than committing secrets).
+3. Set `ADMIN_PIN`, `YOCO_SECRET_KEY`, `ALLOWED_ORIGIN`, `SUPABASE_URL`, and
+   `SUPABASE_SERVICE_ROLE_KEY` as prompted (they're marked `sync: false` so Render
+   asks for them rather than committing secrets).
 4. Deploy. `Procfile` is included as a fallback if you deploy without Blueprints.
 
-**Note:** Render allows one persistent disk per service, mounted on `data/`
-(the SQLite DB). Product photos no longer need that disk — they live on Cloudinary.
-`public/uploads/` is still used for quote-request portfolio attachments only, which
-remain ephemeral (unrelated to product images; out of scope for this fix).
+## Database persistence (Render Free tier)
+Render's Free tier has an ephemeral filesystem and no persistent disks: the local SQLite file
+is wiped on every redeploy, restart, **and idle spin-down (15 min)**. To keep products and
+orders, the server:
+- **restores** the database from a *private* Supabase Storage bucket (`thalente-private-backup`,
+  created automatically — no setup needed) before opening it (`restore-db.js`, run by `server.js`);
+- **backs it up** ~1.5s after every successful write, and once more on shutdown (SIGTERM).
+If a restore fails for an unknown reason, backups are disabled for that run so an empty database
+can never overwrite your real backup (check the Render logs for `[restore] FAILED`).
+Uses the same `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` variables — nothing new to add.
+Tip: a free uptime pinger hitting `/api/health` every ~10 minutes avoids the ~1 minute cold start.
+A paid instance + disk (see `render.yaml`) also works and makes this backup a safety net.
+
+**Note:** `public/uploads/` (quote-request attachments only) is still ephemeral.
 
 ## Fixes applied (Sep 2026)
 1. **Splash screen freeze** — `server.js` was running Helmet's *default* Content-Security-Policy,
@@ -84,7 +99,7 @@ remain ephemeral (unrelated to product images; out of scope for this fix).
    shows demo items even on an existing deployment. The catalog now starts genuinely empty and
    is populated exclusively through the admin dashboard — the storefront shows a clear "No
    products are available yet" message until then, never a placeholder.
-4. **Permanent product image storage (Cloudinary)** — two separate bugs were found and fixed:
+4. **Permanent product image storage (Supabase Storage)** — two separate bugs were found and fixed:
    - `admin.html`'s product form built a `FormData`, immediately flattened it with
      `Object.fromEntries()`, then sent it as `JSON.stringify(...)` with a manually-set
      `Content-Type: application/json`. A `File` object has no enumerable properties, so
@@ -94,21 +109,22 @@ remain ephemeral (unrelated to product images; out of scope for this fix).
      is selected, while leaving the existing JSON path untouched for edits with no new file.
    - Uploaded files were saved to `public/uploads/`, which isn't on Render's persistent disk —
      they were silently deleted on every redeploy while the (persisted) database kept pointing
-     at the now-missing file. Fixed by uploading directly to Cloudinary and storing the returned
-     permanent HTTPS URL in `products.image_url` instead — `public/uploads/` is no longer used
-     for product photos at all. Also added real magic-byte sniffing (not just the client-supplied
-     MIME type) before any upload is accepted or sent to Cloudinary.
+     at the now-missing file. Fixed by uploading directly to a Supabase Storage bucket and
+     storing the returned permanent public URL in `products.image_url` instead —
+     `public/uploads/` is no longer used for product photos at all. Also added real
+     magic-byte sniffing (not just the client-supplied MIME type) before any upload is
+     accepted or sent to Supabase.
 
 ## Project structure
 - `server.js` — Express server, SQLite schema, product/admin/order APIs, Yoco integration,
-  Cloudinary image uploads, CSP config
+  Supabase Storage image uploads, CSP config
 - `index.html` — the live storefront: splash screen, dynamic catalogue (pulled exclusively from
   `/api/products`), cart/wishlist, checkout, manifest/icon links
 - `admin.html` — owner dashboard, fully wired to the API; favicon/apple-touch-icon links added
 - `order-success.html` — order confirmation/receipt; favicon/apple-touch-icon links added
 - `public/manifest.json` / `public/icons/` — PWA manifest and generated icon set
 - `public/uploads/` — quote-request portfolio attachments only (ephemeral; gitignored). Product
-  photos are no longer stored here — see Cloudinary section above
+  photos are no longer stored here — see Supabase Storage section above
 - `data/thalente.sqlite` — runtime database (created automatically, gitignored; starts with zero
   products until added via `/admin`)
 - `deepseek_html_20260731_90dbdd (1).html` — superseded draft, kept only for reference; no longer served
